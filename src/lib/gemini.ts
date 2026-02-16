@@ -1,55 +1,78 @@
 import OpenAI from "openai";
-import type { AnalysisResult, GitHubProfileData } from "./types";
+import type { AnalysisResult, DualAnalysisResult, GitHubProfileData } from "./types";
 import { sanitizeProfileForAI } from "./sanitize";
-import { getPersonaPrompt, type PersonaType } from "./personas";
 
 // ============================================
-// AI Analyzer (OpenRouter)
+// AI Analyzer (OpenRouter) — Dual Persona Mode
 // ============================================
 
-// --- SYSTEM PROMPT (Algorithmic Scoring Engine) ---
+// --- DUAL PERSONA SYSTEM PROMPT ---
+// Asks the AI to evaluate from BOTH perspectives in ONE response.
 export const SYSTEM_PROMPT = `
-You are a ruthless Scoring Algorithm, not a Recruiter. Do not "judge" based on potential. Calculate based on PROOF.
+You are a Dual-Persona Technical Auditor. You must analyze the candidate from TWO perspectives simultaneously.
 
-**ALGORITHMIC SCORING RULES (Follow Step-by-Step):**
+**1. 🕵️ THE FAANG RECRUITER (Strict)**
+   - **Priorities:** Unit Tests, TypeScript, CI/CD, Code Consistency.
+   - **Scoring:** Cap at 60 if no tests. Cap at 70 if no Types/Linter.
+   - **Tone:** Professional, objective, critical.
 
-**STEP 1: DETERMINE BASE SCORE (The Ceiling)**
-- **User is a Student/Junior (based on bio):** START AT 60. (Max Cap: 85).
-- **User is a Founder/Professional:** START AT 80. (Max Cap: 100).
+**2. 🚀 THE STARTUP FOUNDER (Pragmatic)**
+   - **Priorities:** Shipping Speed, Live Deployments (Vercel/Netlify), "Hero Projects".
+   - **Scoring:** +20 pts for ANY live deployment link. Forgives messy code if it works.
+   - **Tone:** Energetic, blunt, focused on value.
 
-**STEP 2: APPLY BONUSES (Proof of Engineering)**
-- **+10 pts:** Has a repo with >50 stars OR a deployed "Production" app (not a demo).
-- **+10 pts:** Usage of Advanced Tech: Docker, Kubernetes, AWS, GraphQL, or CI/CD workflows.
-- **+5 pts:** Active in the last 7 days.
+**SHARED SCORING RULES:**
 
-**STEP 3: APPLY PENALTIES (The "One-Hit Wonder" Filter)**
-- **-15 pts (CRITICAL):** If the user has ONLY ONE complex repo (Tier 3) and the rest are Tier 1 (Calculators, To-Do, HTML), apply this penalty.
-- **-10 pts:** If "Documentation" is weak (no architecture diagrams, just "npm install").
-- **-10 pts:** If >50% of repos haven't been touched in 6 months. (Ignore this if User is Founder).
+STEP 1: BASE SCORE
+- Student/Junior: START AT 60. (Max Cap: 85).
+- Founder/Professional: START AT 80. (Max Cap: 100).
 
-**STEP 4: FINAL CALCULATION**
-(Base + Bonuses - Penalties).
-- **HARD CAP:** If User is "Student" and has < 2 Tier 3 Repos, the Final Score CANNOT exceed 65.
+STEP 2: BONUSES
+- +10 pts: Repo with >50 stars OR deployed production app.
+- +10 pts: Advanced Tech (Docker, K8s, AWS, GraphQL, CI/CD).
+- +5 pts: Active in last 7 days.
 
-**STEP 5: PRECISION RULE (CRITICAL)**
-- Your total_score MUST be a PRECISE integer, NOT a round number.
-- FORBIDDEN scores: 50, 60, 70, 80, 90. These are lazy and unacceptable.
-- REQUIRED: Use specific values like 47, 53, 61, 67, 73, 78, 84, etc.
-- For dimension scores (0-10): Use the FULL range. Scores of 5 and 7 for every dimension are lazy. Vary between 3, 4, 6, 7, 8, 9 based on actual evidence.
+STEP 3: PENALTIES
+- -15 pts: Only ONE complex repo, rest are tutorials.
+- -10 pts: Weak documentation (just "npm install").
+- -10 pts: >50% repos untouched 6 months.
 
-**OUTPUT JSON:**
+STEP 4: PRECISION RULE (CRITICAL)
+- total_score MUST be a PRECISE integer. FORBIDDEN: 50, 60, 70, 80, 90.
+- REQUIRED: values like 47, 53, 61, 67, 73, 78, 84.
+- The recruiter and founder scores MUST BE DIFFERENT.
+- Dimension scores (0-10): Use the FULL range.
+
+**OUTPUT JSON FORMAT (STRICT — no markdown, no backticks):**
 {
-  "total_score": number,
-  "summary": "Write as a professional justification. Example: 'Base Score: 60 (Student Profile). No major technical bonuses detected. Code structure is decent, but lacks the complexity required for a Senior rating.'",
-  "dimensions": {
-    "documentation": { "score": 0-10, "comment": "Brief feedback on READMEs" },
-    "code_structure": { "score": 0-10, "comment": "Feedback on repo organization" },
-    "consistency": { "score": 0-10, "comment": "Based on 'updated_at' dates" },
-    "impact": { "score": 0-10, "comment": "Does the project solve a real problem?" },
-    "technical_depth": { "score": 0-10, "comment": "Complexity of languages/tools used" }
+  "recruiter": {
+    "total_score": number,
+    "summary": "Professional justification from FAANG recruiter...",
+    "role_fit": "Junior Dev" | "Mid-Level" | "Senior Engineer" | "Staff+",
+    "dimensions": {
+      "documentation": { "score": 0-10, "comment": "..." },
+      "code_structure": { "score": 0-10, "comment": "..." },
+      "consistency": { "score": 0-10, "comment": "..." },
+      "impact": { "score": 0-10, "comment": "..." },
+      "technical_depth": { "score": 0-10, "comment": "..." }
+    },
+    "recruiter_verdict": "Pass" | "Interview" | "Strong Hire",
+    "actionable_feedback": ["...", "...", "..."]
   },
-  "recruiter_verdict": "Pass" | "Interview" | "Strong Hire",
-  "actionable_feedback": ["3", "bullet", "points", "of", "specific", "fixes"]
+  "founder": {
+    "total_score": number,
+    "summary": "Blunt justification from YC founder...",
+    "role_fit": "Not Ready" | "Intern Material" | "Indie Hacker" | "Founding Engineer",
+    "dimensions": {
+      "documentation": { "score": 0-10, "comment": "..." },
+      "code_structure": { "score": 0-10, "comment": "..." },
+      "consistency": { "score": 0-10, "comment": "..." },
+      "impact": { "score": 0-10, "comment": "..." },
+      "technical_depth": { "score": 0-10, "comment": "..." }
+    },
+    "recruiter_verdict": "Pass" | "Interview" | "Strong Hire",
+    "actionable_feedback": ["...", "...", "..."]
+  }
 }
 `;
 
@@ -58,23 +81,43 @@ const MAX_RETRIES = 2;
 const BASE_DELAY_MS = 2000;
 
 // --- MOCK DATA FOR DEMO MODE ---
-const MOCK_ANALYSIS: AnalysisResult = {
-    total_score: 72,
-    summary:
-        "Solid profile with clear engineering depth. Projects demonstrate architectural understanding and consistent contribution history.",
-    dimensions: {
-        documentation: { score: 8, comment: "READMEs are well-structured with demos and setup steps." },
-        code_structure: { score: 7, comment: "Clean repo organization, though some legacy repos lack structure." },
-        consistency: { score: 7, comment: "Consistent commit history over the past 6 months." },
-        impact: { score: 6, comment: "Mix of portfolio projects and practice repos; some solve real problems." },
-        technical_depth: { score: 8, comment: "Strong grasp of modern stack (Next.js, TypeScript, Cloud Infrastructure)." },
+const MOCK_DUAL: DualAnalysisResult = {
+    recruiter: {
+        total_score: 57,
+        summary: "Candidate shows foundational understanding of modern web technologies but lacks production-grade engineering signals. No test suites, no CI/CD pipelines, and documentation is surface-level. Would need significant mentorship.",
+        role_fit: "Junior Dev",
+        dimensions: {
+            documentation: { score: 4, comment: "READMEs are install-only. No architecture context or design rationale." },
+            code_structure: { score: 6, comment: "Reasonable folder structure but no evidence of design patterns or abstractions." },
+            consistency: { score: 5, comment: "Sporadic commit frequency with multi-week gaps." },
+            impact: { score: 4, comment: "Portfolio projects only. No evidence of real-world users or problem-solving." },
+            technical_depth: { score: 7, comment: "Competent with Next.js and TypeScript. Missing backend and infrastructure depth." },
+        },
+        recruiter_verdict: "Interview",
+        actionable_feedback: [
+            "Add Jest/Vitest tests to at least one project — this alone would boost your score by 10+ points.",
+            "Set up GitHub Actions CI/CD to demonstrate DevOps awareness.",
+            "Expand READMEs with architecture decisions, not just setup instructions.",
+        ],
     },
-    recruiter_verdict: "Interview",
-    actionable_feedback: [
-        "Archive or unpin low-quality forked repositories to focus on original work.",
-        "Add CONTRIBUTING.md to major projects to encourage open source engagement.",
-        "Update dependency chains on older projects to remove security alerts.",
-    ],
+    founder: {
+        total_score: 73,
+        summary: "This person ships. Multiple finished projects, some with live deployment links. Not overthinking it — just building. Exactly the mentality a seed-stage startup needs.",
+        role_fit: "Indie Hacker",
+        dimensions: {
+            documentation: { score: 6, comment: "Good enough to onboard someone quickly. Functional, not fancy." },
+            code_structure: { score: 5, comment: "Scrappy but it works. Not enterprise-grade, but who cares at this stage." },
+            consistency: { score: 7, comment: "Regular commits show a builder mentality. Keeps iterating." },
+            impact: { score: 8, comment: "Deployed apps that solve real problems. User-centric thinking." },
+            technical_depth: { score: 6, comment: "Pragmatic stack choices. Ships with Next.js, doesn't overthink." },
+        },
+        recruiter_verdict: "Interview",
+        actionable_feedback: [
+            "Add Google Analytics to deployed apps and showcase real user numbers.",
+            "Build one project with payments or auth to prove full-stack chops.",
+            "Write a 'How I Built This' blog post to flex product thinking.",
+        ],
+    },
 };
 
 function sleep(ms: number): Promise<void> {
@@ -93,22 +136,53 @@ function extractJSON(text: string): string {
 }
 
 /**
+ * Validates and clamps a single AnalysisResult.
+ */
+function validateAnalysis(parsed: AnalysisResult): AnalysisResult {
+    parsed.total_score = Math.max(0, Math.min(100, Math.round(parsed.total_score || 0)));
+    if (!Array.isArray(parsed.actionable_feedback)) parsed.actionable_feedback = [];
+
+    const dims = parsed.dimensions;
+    let calculatedTotal = 0;
+
+    for (const key of ["documentation", "code_structure", "consistency", "impact", "technical_depth"] as const) {
+        if (dims[key]) {
+            const rawDimScore = Number(dims[key].score);
+            dims[key].score = Math.max(0, Math.min(10, Math.round(Boolean(rawDimScore) ? rawDimScore : 0)));
+            calculatedTotal += dims[key].score;
+        }
+    }
+
+    const rawTotalScore = Number(parsed.total_score);
+    if (!rawTotalScore || rawTotalScore === 0) {
+        parsed.total_score = calculatedTotal * 2;
+    } else {
+        parsed.total_score = Math.max(0, Math.min(100, Math.round(rawTotalScore)));
+    }
+
+    if (!["Strong Hire", "Interview", "Pass"].includes(parsed.recruiter_verdict)) {
+        parsed.recruiter_verdict = parsed.total_score >= 70 ? "Strong Hire" : parsed.total_score >= 45 ? "Interview" : "Pass";
+    }
+
+    return parsed;
+}
+
+/**
  * Sends GitHub profile data to AI for analysis via OpenRouter.
- * Uses sanitized, minimal payload to reduce token costs.
+ * Returns BOTH recruiter and founder perspectives in a single call.
  */
 export async function analyzeProfile(
-    profileData: GitHubProfileData,
-    persona: PersonaType = 'recruiter'
-): Promise<AnalysisResult> {
+    profileData: GitHubProfileData
+): Promise<DualAnalysisResult> {
     // --- DEMO MODE BYPASS ---
     if (
         profileData.user.login.toLowerCase() === "demo" ||
         profileData.user.login.toLowerCase() === "test" ||
         process.env.NEXT_PUBLIC_DEMO_MODE === "true"
     ) {
-        console.log("[AI] DEMO MODE: Returning mock analysis.");
+        console.log("[AI] DEMO MODE: Returning mock dual analysis.");
         await sleep(1500);
-        return MOCK_ANALYSIS;
+        return MOCK_DUAL;
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -133,7 +207,7 @@ export async function analyzeProfile(
         `[AI] Payload sanitized: ${(rawSize / 1024).toFixed(1)}kb → ${(cleanSize / 1024).toFixed(1)}kb (${reduction}% reduction)`
     );
 
-    const userMessage = `Analyze this GitHub profile:\n\n${sanitizedPayload}`;
+    const userMessage = `Analyze this GitHub profile from BOTH perspectives (recruiter AND founder). Return a single JSON with both:\n\n${sanitizedPayload}`;
 
     // Initialize OpenAI client with OpenRouter base URL
     const client = new OpenAI({
@@ -155,19 +229,17 @@ export async function analyzeProfile(
                 await sleep(delay);
             }
 
-            console.log(`[AI] Calling OpenRouter (${model}), persona: ${persona}, attempt ${attempt + 1}...`);
-
-            const systemPrompt = getPersonaPrompt(persona);
+            console.log(`[AI] Calling OpenRouter (${model}), DUAL PERSONA mode, attempt ${attempt + 1}...`);
 
             const completion = await client.chat.completions.create({
                 model: model,
                 messages: [
-                    { role: "system", content: systemPrompt },
+                    { role: "system", content: SYSTEM_PROMPT },
                     { role: "user", content: userMessage },
                 ],
-                temperature: 0.4,  // Balanced: deterministic enough but allows granular scores
-                max_tokens: 800,
-                seed: 42,          // Fixed seed = same input → same output
+                temperature: 0.4,
+                max_tokens: 1500, // Increased for dual output
+                seed: 42,
             });
 
             const rawText = completion.choices[0]?.message?.content;
@@ -176,52 +248,18 @@ export async function analyzeProfile(
             }
 
             const cleanJSON = extractJSON(rawText);
-            const parsed: AnalysisResult = JSON.parse(cleanJSON);
+            const parsed: DualAnalysisResult = JSON.parse(cleanJSON);
 
-            // Validation
-            if (
-                typeof parsed.total_score !== "number" ||
-                typeof parsed.summary !== "string" ||
-                !parsed.dimensions ||
-                !parsed.recruiter_verdict
-            ) {
-                throw new Error("Invalid response structure from AI");
+            // Validate both sides exist
+            if (!parsed.recruiter || !parsed.founder) {
+                throw new Error("AI did not return both recruiter and founder perspectives");
             }
 
-            parsed.total_score = Math.max(0, Math.min(100, Math.round(parsed.total_score)));
-            if (!Array.isArray(parsed.actionable_feedback)) parsed.actionable_feedback = [];
+            // Validate and clamp both
+            parsed.recruiter = validateAnalysis(parsed.recruiter);
+            parsed.founder = validateAnalysis(parsed.founder);
 
-            // Ensure all dimension scores are clamped 0-10
-            const dims = parsed.dimensions;
-            let calculatedTotal = 0;
-
-            for (const key of ["documentation", "code_structure", "consistency", "impact", "technical_depth"] as const) {
-                if (dims[key]) {
-                    // Handle potential string numbers from AI
-                    const rawDimScore = Number(dims[key].score);
-                    dims[key].score = Math.max(0, Math.min(10, Math.round(Boolean(rawDimScore) ? rawDimScore : 0)));
-                    calculatedTotal += dims[key].score;
-                }
-            }
-
-            // ROBUST FIX: If total_score is 0 or missing, recalculate it from dimensions.
-            // Max score = 5 dimensions * 10 points * 2 multiplier = 100.
-            // If AI explicitly returned 0 but dimensions are non-zero, it likely hallucinated the total.
-            const rawTotalScore = Number(parsed.total_score);
-            if (!rawTotalScore || rawTotalScore === 0) {
-                // Double the sum of dimensions to get percent (50 * 2 = 100)
-                parsed.total_score = calculatedTotal * 2;
-                console.log(`[AI] Recalculated total_score from dimensions: ${parsed.total_score}`);
-            } else {
-                parsed.total_score = Math.max(0, Math.min(100, Math.round(rawTotalScore)));
-            }
-
-            // Ensure verdict is valid
-            if (!["Strong Hire", "Interview", "Pass"].includes(parsed.recruiter_verdict)) {
-                parsed.recruiter_verdict = parsed.total_score >= 70 ? "Strong Hire" : parsed.total_score >= 45 ? "Interview" : "Pass";
-            }
-
-            console.log(`[AI] Success! Score: ${parsed.total_score}, Verdict: ${parsed.recruiter_verdict}`);
+            console.log(`[AI] Success! Recruiter: ${parsed.recruiter.total_score}, Founder: ${parsed.founder.total_score}`);
             return parsed;
         } catch (error) {
             lastError = error instanceof Error ? error : new Error(String(error));
@@ -229,11 +267,18 @@ export async function analyzeProfile(
         }
     }
 
-    // --- FINAL FALLBACK: AUTOMATIC DEMO MODE ---
+    // --- FINAL FALLBACK ---
     console.warn("[AI] All attempts failed. Falling back to MOCK DATA.");
     return {
-        ...MOCK_ANALYSIS,
-        isMockData: true,
-        summary: `(System Note: Live analysis failed. Showing demo data.) ${MOCK_ANALYSIS.summary}`
+        recruiter: {
+            ...MOCK_DUAL.recruiter,
+            isMockData: true,
+            summary: `(System Note: Live analysis failed. Showing demo data.) ${MOCK_DUAL.recruiter.summary}`
+        },
+        founder: {
+            ...MOCK_DUAL.founder,
+            isMockData: true,
+            summary: `(System Note: Live analysis failed. Showing demo data.) ${MOCK_DUAL.founder.summary}`
+        },
     };
 }

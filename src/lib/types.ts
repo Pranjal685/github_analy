@@ -64,6 +64,7 @@ export interface AnalysisResult {
     total_score: number; // 0-100
     score?: number; // Fallback for legacy/hallucinated responses
     summary: string;
+    role_fit: string; // e.g., "Junior Dev", "Indie Hacker", "Senior Engineer"
     dimensions: {
         documentation: DimensionScore;
         code_structure: DimensionScore;
@@ -76,6 +77,12 @@ export interface AnalysisResult {
     isMockData?: boolean; // true when falling back to demo data
 }
 
+/** Both persona results from a single AI call */
+export interface DualAnalysisResult {
+    recruiter: AnalysisResult;
+    founder: AnalysisResult;
+}
+
 // --- Server Action Response ---
 
 export interface AnalysisResponse {
@@ -84,3 +91,4 @@ export interface AnalysisResponse {
     profileData?: GitHubProfileData;
     error?: string;
 }
+

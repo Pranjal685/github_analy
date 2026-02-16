@@ -27,11 +27,14 @@ import Link from "next/link";
 
 interface ReportPageProps {
     params: Promise<{ username: string }>;
+    searchParams: Promise<{ persona?: string }>;
 }
 
-export default async function ReportPage({ params }: ReportPageProps) {
+export default async function ReportPage({ params, searchParams }: ReportPageProps) {
     const { username } = await params;
-    const result = await performAnalysis(username);
+    const { persona: rawPersona } = await searchParams;
+    const persona: "recruiter" | "founder" = rawPersona === "founder" ? "founder" : "recruiter";
+    const result = await performAnalysis(username, persona);
 
     // --- Error State ---
     if (!result.success || !result.data || !result.profileData) {
@@ -57,22 +60,8 @@ export default async function ReportPage({ params }: ReportPageProps) {
     const { data: analysis, profileData } = result;
     const { user, repos } = profileData;
 
-    // console.log("AI Response:", analysis); // Debugging - REMOVED for cleanup
-
     // Score color logic
-    // Score color logic - FIXED & ROBUST
-    // Fallback: AI Total -> AI Score -> Dimensions Calc -> Repo Count Estimate
-    const calculateFallbackScore = () => {
-        if (analysis.total_score) return analysis.total_score;
-        if (analysis.score) return analysis.score;
-
-        // Final fallback: Calculate based on pubic repos (capped at 70 for "decent activity")
-        const repoScore = Math.min(repos.length * 5, 70);
-        return Math.max(repoScore, 40); // Never show 0 if they have repos
-    };
-
-    const scoreVal = calculateFallbackScore();
-
+    const scoreVal = analysis.total_score || 0;
     const scoreColor =
         scoreVal < 50 ? "red" : scoreVal < 80 ? "yellow" : "green";
     const scoreBarClass =
@@ -95,6 +84,9 @@ export default async function ReportPage({ params }: ReportPageProps) {
     const accountAge = Math.floor(
         (Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24 * 365)
     );
+
+    // Persona toggle links (instant switch via cache)
+    const otherPersona = persona === "recruiter" ? "founder" : "recruiter";
 
     return (
         <main className="relative min-h-screen p-4 md:p-8">
@@ -178,12 +170,47 @@ export default async function ReportPage({ params }: ReportPageProps) {
                     </Card>
                 </div>
 
+                {/* ====== PERSONA TOGGLE ====== */}
+                <div className="flex gap-2 w-full">
+                    <Link
+                        href={`/report/${username}?persona=recruiter`}
+                        className={`flex-1 px-4 py-3 rounded-lg border text-sm font-medium text-center transition-all duration-200 ${persona === "recruiter"
+                                ? "border-cyan-500 bg-cyan-500/10 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.15)]"
+                                : "border-white/10 bg-white/[0.02] text-zinc-400 hover:border-white/20 hover:bg-white/[0.04]"
+                            }`}
+                    >
+                        <span className="block text-base">🕵️ FAANG Recruiter</span>
+                        <span className="block text-[11px] text-zinc-500 mt-0.5 font-normal">
+                            Strict. Tests, types, CI/CD.
+                        </span>
+                    </Link>
+                    <Link
+                        href={`/report/${username}?persona=founder`}
+                        className={`flex-1 px-4 py-3 rounded-lg border text-sm font-medium text-center transition-all duration-200 ${persona === "founder"
+                                ? "border-orange-500 bg-orange-500/10 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.15)]"
+                                : "border-white/10 bg-white/[0.02] text-zinc-400 hover:border-white/20 hover:bg-white/[0.04]"
+                            }`}
+                    >
+                        <span className="block text-base">🚀 YC Founder</span>
+                        <span className="block text-[11px] text-zinc-500 mt-0.5 font-normal">
+                            Pragmatic. Ships & deploys.
+                        </span>
+                    </Link>
+                </div>
+
                 {/* ====== SCORE CARD ====== */}
                 <div className="animate-fade-in-up-delay-1">
                     <Card className="overflow-hidden">
                         <CardHeader>
                             <CardTitle className="flex items-center justify-between text-lg md:text-xl">
-                                <span>Hiring Signal Score</span>
+                                <div className="space-y-1">
+                                    <span>Hiring Signal Score</span>
+                                    {analysis.role_fit && (
+                                        <span className="block text-sm font-normal text-zinc-400">
+                                            Role Fit: <span className="text-cyan-400 font-medium">{analysis.role_fit}</span>
+                                        </span>
+                                    )}
+                                </div>
                                 <AnimatedScore score={scoreVal} />
                             </CardTitle>
                         </CardHeader>
@@ -207,7 +234,6 @@ export default async function ReportPage({ params }: ReportPageProps) {
 
                 {/* ====== DIMENSION SCORES ====== */}
                 <div className="animate-fade-in-up-delay-2 grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
-                    {/* Dimension Breakdown */}
                     <Card className="md:col-span-2">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2 text-cyan-400 text-lg md:text-xl">
@@ -262,7 +288,7 @@ export default async function ReportPage({ params }: ReportPageProps) {
                         </CardHeader>
                         <CardContent>
                             <ul className="space-y-4">
-                                {analysis.actionable_feedback.map((item, i) => (
+                                {analysis.actionable_feedback.map((item: string, i: number) => (
                                     <li key={i} className="flex items-start gap-3 text-base">
                                         <Wrench className="h-5 w-5 text-cyan-400 mt-0.5 shrink-0" />
                                         <span className="text-zinc-300 leading-relaxed">{item}</span>
@@ -338,9 +364,19 @@ export default async function ReportPage({ params }: ReportPageProps) {
                 </div>
 
                 {/* Footer */}
-                <footer className="text-center text-xs text-muted-foreground py-4 font-mono">
-                    <span className="text-cyan-400/60">$</span> Analysis generated at{" "}
-                    {new Date(profileData.fetchedAt).toLocaleString()}
+                <footer className="text-center text-xs text-muted-foreground py-4 font-mono space-y-1">
+                    <div>
+                        <span className="text-cyan-400/60">$</span> Viewed as{" "}
+                        <span className="text-cyan-400">{persona === "recruiter" ? "🕵️ FAANG Recruiter" : "🚀 YC Founder"}</span>
+                        {" · "}
+                        <Link href={`/report/${username}?persona=${otherPersona}`} className="underline hover:text-cyan-400 transition-colors">
+                            Switch to {otherPersona === "recruiter" ? "Recruiter" : "Founder"} view
+                        </Link>
+                    </div>
+                    <div>
+                        <span className="text-cyan-400/60">$</span> Analysis generated at{" "}
+                        {new Date(profileData.fetchedAt).toLocaleString()}
+                    </div>
                 </footer>
             </div>
         </main>

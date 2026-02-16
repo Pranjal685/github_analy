@@ -1,19 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, ChevronDown } from "lucide-react";
 import { extractUsername } from "@/lib/utils";
-import { PERSONAS, type PersonaType } from "@/lib/personas";
+
+const PERSONAS = [
+    { value: "recruiter" as const, label: "🕵️ Recruiter Mode", desc: "Strict · Tests, types, CI/CD" },
+    { value: "founder" as const, label: "🚀 Founder Mode", desc: "Pragmatic · Ships & deploys" },
+];
 
 export function SearchForm() {
     const [inputValue, setInputValue] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [persona, setPersona] = useState<PersonaType>("recruiter");
+    const [persona, setPersona] = useState<"recruiter" | "founder">("recruiter");
+    const [dropdownOpen, setDropdownOpen] = useState(false);
+    const dropdownRef = useRef<HTMLDivElement>(null);
     const router = useRouter();
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        function handleClickOutside(e: MouseEvent) {
+            if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+                setDropdownOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -29,33 +46,17 @@ export function SearchForm() {
         router.push(`/report/${encodeURIComponent(username)}?persona=${persona}`);
     };
 
+    const selected = PERSONAS.find((p) => p.value === persona)!;
+
     return (
         <form onSubmit={handleSubmit} className="flex flex-col w-full max-w-lg gap-3">
-            {/* Persona Toggle */}
-            <div className="flex gap-2 w-full">
-                {(Object.values(PERSONAS) as typeof PERSONAS[PersonaType][]).map((p) => (
-                    <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => setPersona(p.id)}
-                        className={`flex-1 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all duration-200 cursor-pointer ${persona === p.id
-                                ? "border-cyan-500 bg-cyan-500/10 text-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.15)]"
-                                : "border-white/10 bg-white/[0.02] text-zinc-400 hover:border-white/20 hover:bg-white/[0.04]"
-                            }`}
-                    >
-                        <span className="block text-base">{p.label}</span>
-                        <span className="block text-[11px] text-zinc-500 mt-0.5 font-normal">{p.description}</span>
-                    </button>
-                ))}
-            </div>
-
-            {/* Search Input + Button */}
+            {/* Search Input + Persona Dropdown */}
             <div className="flex gap-3 w-full">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-zinc-500" />
                     <Input
                         type="text"
-                        placeholder="Enter GitHub URL (e.g., https://github.com/username)..."
+                        placeholder="Enter GitHub URL or username..."
                         value={inputValue}
                         onChange={(e) => {
                             setInputValue(e.target.value);
@@ -67,6 +68,42 @@ export function SearchForm() {
                         spellCheck={false}
                     />
                 </div>
+
+                {/* Custom Themed Dropdown */}
+                <div className="relative" ref={dropdownRef}>
+                    <button
+                        type="button"
+                        onClick={() => setDropdownOpen((prev) => !prev)}
+                        disabled={isLoading}
+                        className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-700 text-zinc-100 text-sm rounded-lg px-3 py-2 outline-none hover:border-zinc-500 focus:ring-2 focus:ring-cyan-500/50 transition-all cursor-pointer whitespace-nowrap backdrop-blur-sm h-full"
+                    >
+                        <span>{selected.label}</span>
+                        <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`} />
+                    </button>
+
+                    {dropdownOpen && (
+                        <div className="absolute top-full mt-1 right-0 z-50 min-w-[200px] rounded-lg border border-zinc-700 bg-zinc-900/95 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.5)] overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+                            {PERSONAS.map((p) => (
+                                <button
+                                    key={p.value}
+                                    type="button"
+                                    onClick={() => {
+                                        setPersona(p.value);
+                                        setDropdownOpen(false);
+                                    }}
+                                    className={`w-full text-left px-4 py-2.5 text-sm transition-colors cursor-pointer ${persona === p.value
+                                            ? "bg-cyan-500/10 text-cyan-400"
+                                            : "text-zinc-300 hover:bg-white/5 hover:text-zinc-100"
+                                        }`}
+                                >
+                                    <span className="block font-medium">{p.label}</span>
+                                    <span className="block text-[11px] text-zinc-500 mt-0.5">{p.desc}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 <Button type="submit" size="lg" disabled={isLoading || !inputValue.trim()}>
                     {isLoading ? (
                         <>
@@ -83,7 +120,7 @@ export function SearchForm() {
                 <p className="text-sm text-red-400 px-1">{error}</p>
             ) : (
                 <p className="text-xs text-zinc-500 px-1">
-                    Accepts profile URLs or usernames. Choose your auditor above.
+                    Pick a perspective, then paste a GitHub URL or username.
                 </p>
             )}
         </form>

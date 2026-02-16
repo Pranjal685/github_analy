@@ -4,56 +4,63 @@ import { fetchGitHubData } from "@/lib/github";
 import { analyzeProfile } from "@/lib/gemini";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { headers } from "next/headers";
-import type { AnalysisResponse } from "@/lib/types";
+import type { AnalysisResponse, DualAnalysisResult } from "@/lib/types";
 import { extractUsername } from "@/lib/utils";
-import type { PersonaType } from "@/lib/personas";
 
 // ============================================
 // Server Action: The Connector
 // ============================================
 
 // --- IN-MEMORY CACHE ---
-// Caches successful analysis results keyed by lowercase username.
+// Caches the FULL dual-persona result keyed by lowercase username.
 // Each entry has a TTL (time-to-live) of 10 minutes.
-// This prevents redundant API calls for the same profile.
+// When a user switches personas, the cache serves the other view instantly.
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-interface CacheEntry {
-    response: AnalysisResponse;
+interface DualCacheEntry {
+    dualResult: DualAnalysisResult;
+    profileData: Awaited<ReturnType<typeof fetchGitHubData>>;
     timestamp: number;
 }
 
-const analysisCache = new Map<string, CacheEntry>();
+const dualCache = new Map<string, DualCacheEntry>();
 
-function getCachedResult(username: string, persona: PersonaType): AnalysisResponse | null {
-    const key = `${username.toLowerCase()}:${persona}`;
-    const entry = analysisCache.get(key);
+function getCachedDual(username: string): DualCacheEntry | null {
+    const key = username.toLowerCase();
+    const entry = dualCache.get(key);
 
     if (!entry) return null;
 
-    // Check if expired
     if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-        analysisCache.delete(key);
+        dualCache.delete(key);
         console.log(`[Cache] Expired for: ${key}`);
         return null;
     }
 
     console.log(`[Cache] HIT for: ${key} (age: ${Math.round((Date.now() - entry.timestamp) / 1000)}s)`);
-    return entry.response;
+    return entry;
 }
 
-function setCachedResult(username: string, persona: PersonaType, response: AnalysisResponse): void {
-    const key = `${username.toLowerCase()}:${persona}`;
-    analysisCache.set(key, { response, timestamp: Date.now() });
-    console.log(`[Cache] STORED for: ${key} (total cached: ${analysisCache.size})`);
+function setCachedDual(
+    username: string,
+    dualResult: DualAnalysisResult,
+    profileData: Awaited<ReturnType<typeof fetchGitHubData>>
+): void {
+    const key = username.toLowerCase();
+    dualCache.set(key, { dualResult, profileData, timestamp: Date.now() });
+    console.log(`[Cache] STORED dual result for: ${key} (total cached: ${dualCache.size})`);
 }
 
 /**
- * Main pipeline: Rate Limit → Cache → GitHub Data → AI Analysis → Response
+ * Main pipeline: Rate Limit → Cache → GitHub Data → AI Analysis → Unwrap by Persona → Response
+ *
+ * The AI returns BOTH recruiter and founder perspectives in a single call.
+ * This function unwraps the selected persona and returns a single AnalysisResult.
+ * Switching personas is instant (cache hit, zero extra tokens).
  */
 export async function performAnalysis(
     username: string,
-    persona: PersonaType = 'recruiter'
+    persona: "recruiter" | "founder" = "recruiter"
 ): Promise<AnalysisResponse> {
     // --- Rate Limit Check ---
     const headersList = await headers();
@@ -74,8 +81,6 @@ export async function performAnalysis(
     console.log(`[RateLimit] OK: ${clientIP} (${rateLimitResult.remaining} remaining)`);
 
     // --- Input Validation ---
-
-    // Sanitize input to handle full URLs or raw usernames
     const cleanUsername = extractUsername(username);
 
     if (!cleanUsername) {
@@ -87,9 +92,6 @@ export async function performAnalysis(
 
     const trimmedUsername = cleanUsername;
 
-    // Basic GitHub username validation (alphanumeric + hyphens, 1-39 chars)
-    // Double check just in case extractUsername missed something specific or if logic differs
-    // extractUsername already executes regex validation, so this is just a safeguard
     if (trimmedUsername.length > 39) {
         return {
             success: false,
@@ -97,10 +99,16 @@ export async function performAnalysis(
         };
     }
 
-    // --- Step 0: Check Cache ---
-    const cached = getCachedResult(trimmedUsername, persona);
+    // --- Step 0: Check Cache (serves both personas from one cached dual result) ---
+    const cached = getCachedDual(trimmedUsername);
     if (cached) {
-        return cached;
+        const selectedAnalysis = cached.dualResult[persona];
+        console.log(`[Cache] Returning ${persona} view (score: ${selectedAnalysis.total_score})`);
+        return {
+            success: true,
+            data: selectedAnalysis,
+            profileData: cached.profileData,
+        };
     }
 
     try {
@@ -108,26 +116,26 @@ export async function performAnalysis(
         console.log(`[Analysis] Fetching GitHub data for: ${trimmedUsername}`);
         const profileData = await fetchGitHubData(trimmedUsername);
 
-        // --- Step 2: Run AI Analysis ---
-        console.log(`[Analysis] Running AI analysis for: ${trimmedUsername} (persona: ${persona})`);
-        const analysisResult = await analyzeProfile(profileData, persona);
+        // --- Step 2: Run AI Analysis (returns BOTH personas in one call) ---
+        console.log(`[Analysis] Running dual-persona AI analysis for: ${trimmedUsername}`);
+        const dualResult = await analyzeProfile(profileData);
 
-        // --- Step 3: Return Combined Result ---
-        console.log(`[Analysis] Complete for: ${trimmedUsername}`);
-        const response: AnalysisResponse = {
-            success: true,
-            data: analysisResult,
-            profileData,
-        };
-
-        // Cache successful result — but NOT mock/fallback data
-        if (!analysisResult.isMockData) {
-            setCachedResult(trimmedUsername, persona, response);
+        // --- Step 3: Cache the full dual result ---
+        if (!dualResult.recruiter.isMockData) {
+            setCachedDual(trimmedUsername, dualResult, profileData);
         } else {
             console.log(`[Cache] SKIPPED mock data for: ${trimmedUsername}`);
         }
 
-        return response;
+        // --- Step 4: Unwrap and return the selected persona ---
+        const selectedAnalysis = dualResult[persona];
+        console.log(`[Analysis] Complete for: ${trimmedUsername} (${persona}: ${selectedAnalysis.total_score})`);
+
+        return {
+            success: true,
+            data: selectedAnalysis,
+            profileData,
+        };
     } catch (error) {
         console.error(`[Analysis] Error for ${trimmedUsername}:`, error);
 
@@ -173,7 +181,7 @@ export async function performAnalysis(
             };
         }
 
-        // Gemini: Quota / Rate limit (429)
+        // AI: Quota / Rate limit (429)
         if (
             message.includes("429") ||
             message.includes("quota") ||
@@ -187,7 +195,7 @@ export async function performAnalysis(
             };
         }
 
-        // Gemini: Model not found
+        // AI: Model not found
         if (message.includes("model") && message.includes("not found")) {
             return {
                 success: false,
