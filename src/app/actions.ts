@@ -6,6 +6,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { headers } from "next/headers";
 import type { AnalysisResponse } from "@/lib/types";
 import { extractUsername } from "@/lib/utils";
+import type { PersonaType } from "@/lib/personas";
 
 // ============================================
 // Server Action: The Connector
@@ -24,8 +25,8 @@ interface CacheEntry {
 
 const analysisCache = new Map<string, CacheEntry>();
 
-function getCachedResult(username: string): AnalysisResponse | null {
-    const key = username.toLowerCase();
+function getCachedResult(username: string, persona: PersonaType): AnalysisResponse | null {
+    const key = `${username.toLowerCase()}:${persona}`;
     const entry = analysisCache.get(key);
 
     if (!entry) return null;
@@ -41,8 +42,8 @@ function getCachedResult(username: string): AnalysisResponse | null {
     return entry.response;
 }
 
-function setCachedResult(username: string, response: AnalysisResponse): void {
-    const key = username.toLowerCase();
+function setCachedResult(username: string, persona: PersonaType, response: AnalysisResponse): void {
+    const key = `${username.toLowerCase()}:${persona}`;
     analysisCache.set(key, { response, timestamp: Date.now() });
     console.log(`[Cache] STORED for: ${key} (total cached: ${analysisCache.size})`);
 }
@@ -51,7 +52,8 @@ function setCachedResult(username: string, response: AnalysisResponse): void {
  * Main pipeline: Rate Limit → Cache → GitHub Data → AI Analysis → Response
  */
 export async function performAnalysis(
-    username: string
+    username: string,
+    persona: PersonaType = 'recruiter'
 ): Promise<AnalysisResponse> {
     // --- Rate Limit Check ---
     const headersList = await headers();
@@ -96,7 +98,7 @@ export async function performAnalysis(
     }
 
     // --- Step 0: Check Cache ---
-    const cached = getCachedResult(trimmedUsername);
+    const cached = getCachedResult(trimmedUsername, persona);
     if (cached) {
         return cached;
     }
@@ -107,8 +109,8 @@ export async function performAnalysis(
         const profileData = await fetchGitHubData(trimmedUsername);
 
         // --- Step 2: Run AI Analysis ---
-        console.log(`[Analysis] Running AI analysis for: ${trimmedUsername}`);
-        const analysisResult = await analyzeProfile(profileData);
+        console.log(`[Analysis] Running AI analysis for: ${trimmedUsername} (persona: ${persona})`);
+        const analysisResult = await analyzeProfile(profileData, persona);
 
         // --- Step 3: Return Combined Result ---
         console.log(`[Analysis] Complete for: ${trimmedUsername}`);
@@ -120,7 +122,7 @@ export async function performAnalysis(
 
         // Cache successful result — but NOT mock/fallback data
         if (!analysisResult.isMockData) {
-            setCachedResult(trimmedUsername, response);
+            setCachedResult(trimmedUsername, persona, response);
         } else {
             console.log(`[Cache] SKIPPED mock data for: ${trimmedUsername}`);
         }

@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { AnalysisResult, GitHubProfileData } from "./types";
 import { sanitizeProfileForAI } from "./sanitize";
+import { getPersonaPrompt, type PersonaType } from "./personas";
 
 // ============================================
 // AI Analyzer (OpenRouter)
@@ -96,7 +97,8 @@ function extractJSON(text: string): string {
  * Uses sanitized, minimal payload to reduce token costs.
  */
 export async function analyzeProfile(
-    profileData: GitHubProfileData
+    profileData: GitHubProfileData,
+    persona: PersonaType = 'recruiter'
 ): Promise<AnalysisResult> {
     // --- DEMO MODE BYPASS ---
     if (
@@ -153,12 +155,14 @@ export async function analyzeProfile(
                 await sleep(delay);
             }
 
-            console.log(`[AI] Calling OpenRouter (${model}), attempt ${attempt + 1}...`);
+            console.log(`[AI] Calling OpenRouter (${model}), persona: ${persona}, attempt ${attempt + 1}...`);
+
+            const systemPrompt = getPersonaPrompt(persona);
 
             const completion = await client.chat.completions.create({
                 model: model,
                 messages: [
-                    { role: "system", content: SYSTEM_PROMPT },
+                    { role: "system", content: systemPrompt },
                     { role: "user", content: userMessage },
                 ],
                 temperature: 0.4,  // Balanced: deterministic enough but allows granular scores
