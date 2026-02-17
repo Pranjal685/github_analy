@@ -1,8 +1,9 @@
 "use client";
 
 import { SearchForm } from "@/components/search-form";
-import { Terminal, Zap, Shield, Github } from "lucide-react";
+import { Terminal, Zap, Shield, Github, Swords, Trophy } from "lucide-react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 
 const container = {
   hidden: {},
@@ -71,6 +72,24 @@ export default function HomePage() {
           <FeaturePill icon={<Zap className="h-3.5 w-3.5" />} text="Instant Analysis" />
           <FeaturePill icon={<Shield className="h-3.5 w-3.5" />} text="Recruiter Perspective" />
           <FeaturePill icon={<Github className="h-3.5 w-3.5" />} text="Public Profiles Only" />
+        </motion.div>
+
+        {/* DevDuel Link */}
+        <motion.div variants={fadeUp} className="flex flex-wrap items-center justify-center gap-3">
+          <Link
+            href="/compare"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-orange-500/20 bg-orange-500/[0.06] text-sm text-orange-400 hover:border-orange-500/40 hover:bg-orange-500/10 hover:text-orange-300 transition-all duration-300 font-medium"
+          >
+            <Swords className="h-4 w-4" />
+            ⚔️ DevDuel — Compare two profiles
+          </Link>
+          <Link
+            href="/leaderboard"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full border border-yellow-500/20 bg-yellow-500/[0.06] text-sm text-yellow-400 hover:border-yellow-500/40 hover:bg-yellow-500/10 hover:text-yellow-300 transition-all duration-300 font-medium"
+          >
+            <Trophy className="h-4 w-4" />
+            🏆 Leaderboard
+          </Link>
         </motion.div>
       </motion.div>
 

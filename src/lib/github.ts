@@ -137,3 +137,85 @@ export async function fetchGitHubData(
         fetchedAt: new Date().toISOString(),
     };
 }
+
+// ============================================
+// Lightweight Fetch for DevDuel Compare Mode
+// ============================================
+
+/**
+ * Lightweight profile fetch for DevDuel comparisons.
+ * - Top 15 repos by stars (no README fetching)
+ * - Minimal repo payload to stay within AI context window
+ * - ~10x smaller than full fetchGitHubData
+ */
+export async function fetchGitHubDataLite(
+    username: string
+): Promise<GitHubProfileData> {
+    // --- Step 1: Fetch User Profile ---
+    const { data: rawUser } = await octokit.users.getByUsername({ username });
+
+    const user: GitHubUser = {
+        login: rawUser.login,
+        name: rawUser.name ?? null,
+        bio: rawUser.bio ?? null,
+        avatar_url: rawUser.avatar_url,
+        html_url: rawUser.html_url,
+        company: rawUser.company ?? null,
+        location: rawUser.location ?? null,
+        blog: rawUser.blog ?? null,
+        twitter_username: rawUser.twitter_username ?? null,
+        followers: rawUser.followers,
+        following: rawUser.following,
+        public_repos: rawUser.public_repos,
+        public_gists: rawUser.public_gists,
+        created_at: rawUser.created_at,
+        updated_at: rawUser.updated_at,
+    };
+
+    // --- Step 2: Fetch repos, sort by stars, take top 15 ---
+    const { data: rawRepos } = await octokit.repos.listForUser({
+        username,
+        sort: "updated",
+        direction: "desc",
+        per_page: 30,
+        type: "owner",
+    });
+
+    const topRepos = rawRepos
+        .sort((a, b) => (b.stargazers_count ?? 0) - (a.stargazers_count ?? 0))
+        .slice(0, 15) // CRITICAL: Hard limit to prevent AI context overflow
+        .map((r) => ({
+            name: r.name,
+            full_name: r.full_name,
+            html_url: r.html_url,
+            description: r.description ?? null,
+            language: r.language ?? null,
+            stargazers_count: r.stargazers_count ?? 0,
+            forks_count: r.forks_count ?? 0,
+            watchers_count: r.watchers_count ?? 0,
+            open_issues_count: r.open_issues_count ?? 0,
+            topics: r.topics ?? [],
+            created_at: r.created_at ?? "",
+            updated_at: r.updated_at ?? "",
+            pushed_at: r.pushed_at ?? "",
+            homepage: r.homepage ?? null,
+            fork: r.fork ?? false,
+            has_wiki: r.has_wiki ?? false,
+            has_pages: r.has_pages ?? false,
+            license: r.license
+                ? { name: r.license.name ?? "", spdx_id: r.license.spdx_id ?? "" }
+                : null,
+            readme_content: null, // SKIPPED — too expensive for compare mode
+        } satisfies GitHubRepo));
+
+    console.log(
+        `[GitHub-Lite] ${username}: Top ${topRepos.length} repos by stars → ${topRepos.map(r => `${r.name}(★${r.stargazers_count})`).join(', ')}`
+    );
+
+    return {
+        user,
+        repos: topRepos,
+        fetchedAt: new Date().toISOString(),
+    };
+}
+

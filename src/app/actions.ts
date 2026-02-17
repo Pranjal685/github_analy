@@ -1,10 +1,11 @@
 "use server";
 
-import { fetchGitHubData } from "@/lib/github";
-import { analyzeProfile } from "@/lib/gemini";
+import { prisma } from "@/lib/prisma";
+import { fetchGitHubData, fetchGitHubDataLite } from "@/lib/github";
+import { analyzeProfile, compareProfiles } from "@/lib/gemini";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { headers } from "next/headers";
-import type { AnalysisResponse, DualAnalysisResult } from "@/lib/types";
+import type { AnalysisResponse, DualAnalysisResult, CompareResponse } from "@/lib/types";
 import { extractUsername } from "@/lib/utils";
 
 // ============================================
@@ -212,3 +213,103 @@ export async function performAnalysis(
         };
     }
 }
+
+// ============================================
+// DevDuel: Compare Two Profiles
+// ============================================
+
+/**
+ * Compare two GitHub profiles head-to-head.
+ * Uses Promise.all to fetch both profiles concurrently.
+ */
+export async function performComparison(
+    username1: string,
+    username2: string,
+    persona: "recruiter" | "founder" = "recruiter"
+): Promise<CompareResponse> {
+    // --- Rate Limit ---
+    const headersList = await headers();
+    const clientIP =
+        headersList.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+        headersList.get("x-real-ip") ||
+        "anonymous";
+
+    const rateLimitResult = checkRateLimit(clientIP);
+    if (!rateLimitResult.allowed) {
+        const retrySeconds = Math.ceil((rateLimitResult.retryAfterMs || 0) / 1000);
+        return {
+            success: false,
+            error: `Too many requests. Please wait ${retrySeconds} seconds.`,
+        };
+    }
+
+    // --- Validate both usernames ---
+    const clean1 = extractUsername(username1);
+    const clean2 = extractUsername(username2);
+
+    if (!clean1 || !clean2) {
+        return {
+            success: false,
+            error: "Please enter valid GitHub usernames or profile URLs for both challengers.",
+        };
+    }
+
+    if (clean1.toLowerCase() === clean2.toLowerCase()) {
+        return {
+            success: false,
+            error: "You can't battle yourself! Enter two different usernames.",
+        };
+    }
+
+    try {
+        // --- Fetch profiles SEQUENTIALLY to avoid GitHub 429 rate limits ---
+        console.log(`[DevDuel] Fetching profile 1: ${clean1}`);
+        const profile1 = await fetchGitHubDataLite(clean1);
+
+        console.log(`[DevDuel] Fetching profile 2: ${clean2}`);
+        const profile2 = await fetchGitHubDataLite(clean2);
+
+        if (!profile1 || !profile2) {
+            throw new Error("One or both users not found");
+        }
+
+        // --- Run comparative AI analysis ---
+        console.log(`[DevDuel] Running AI comparison: ${clean1} vs ${clean2} (${persona})`);
+        const result = await compareProfiles(profile1, profile2, persona);
+
+        console.log(`[DevDuel] Complete! Winner: ${result.winner}`);
+
+        // SAVE TO DB (Fire & Forget)
+        try {
+            await prisma.battle.create({
+                data: {
+                    user1: clean1,
+                    user2: clean2,
+                    score1: result.user1_stats.score,
+                    score2: result.user2_stats.score,
+                    winner: result.winner === "user1" ? clean1 : clean2,
+                    persona: persona,
+                },
+            });
+            console.log(`[DevDuel] Battle saved to DB`);
+        } catch (dbError) {
+            console.error("[DevDuel] Database Save Failed:", dbError);
+            // Do NOT throw — still show the user the result
+        }
+
+        return {
+            success: true,
+            data: result,
+        };
+    } catch (error: unknown) {
+        // Phase 3: FAIL LOUDLY — return real error message, not fake data
+        const message = error instanceof Error ? error.message : "Analysis Failed";
+        console.error(`[DevDuel] Error:`, message);
+
+        return {
+            success: false,
+            error: message,
+        };
+    }
+}
+

@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Battle {
+  id        String   @id @default(cuid())
+  user1     String
+  user2     String
+  score1    Int
+  score2    Int
+  winner    String
+  persona   String
+  createdAt DateTime @default(now())
+
+  // Indexes for performance
+  @@index([score1(sort: Desc)])
+  @@index([score2(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}

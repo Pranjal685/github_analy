@@ -92,3 +92,30 @@ export interface AnalysisResponse {
     error?: string;
 }
 
+// --- DevDuel Compare Types ---
+
+export interface UserStats {
+    score: number;
+    top_repo: string;
+}
+
+export interface CompareResult {
+    winner: string; // username of winner, or "tie"
+    winner_reason: string;
+    head_to_head: {
+        velocity: string;
+        quality: string;
+        impact: string;
+    };
+    user1_stats: UserStats;
+    user2_stats: UserStats;
+    user1_username: string;
+    user2_username: string;
+}
+
+export interface CompareResponse {
+    success: boolean;
+    data?: CompareResult;
+    error?: string;
+}
+

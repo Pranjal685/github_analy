@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import type { AnalysisResult, DualAnalysisResult, GitHubProfileData } from "./types";
+import { unstable_cache } from "next/cache";
+import type { AnalysisResult, DualAnalysisResult, GitHubProfileData, CompareResult } from "./types";
 import { sanitizeProfileForAI } from "./sanitize";
 
 // ============================================
@@ -282,3 +283,220 @@ export async function analyzeProfile(
         },
     };
 }
+
+// ============================================
+// DevDuel — Comparative Analysis (Referee Mode)
+// ============================================
+
+// Weighted Category Scoring System
+const COMPARE_SYSTEM_PROMPT = `
+ROLE: Technical Referee.
+TASK: Compare Candidate A vs Candidate B.
+
+--------------------------------------------------------
+SCORING ALGORITHM (WEIGHTED SUM):
+
+You must score each candidate across 5 dimensions. Sum them to get the Total Score.
+*CRITICAL: Do not use round numbers. Use integers like 23, 17, 8, etc.*
+
+### IF PERSONA = "RECRUITER" (Strict & Corporate)
+1. **Architecture & Clean Code (Max 30pts):** Are repos organized? No spaghetti code?
+2. **Type Safety & Languages (Max 25pts):** Reward TypeScript/Rust/Go. Penalize loose JS/Python.
+3. **Testing & CI/CD (Max 20pts):** Presence of Jest/Vitest and .github/workflows.
+4. **Documentation (Max 15pts):** README quality, setup guides.
+5. **Consistency (Max 10pts):** Regular commit history vs gaps.
+
+### IF PERSONA = "FOUNDER" (Fast & Product-Led)
+1. **Shipping & Live Links (Max 30pts):** Vercel/Netlify/AppStore links = High Score.
+2. **Product Complexity (Max 25pts):** DB+Auth+UI > Static Landing Pages.
+3. **Velocity (Max 20pts):** High activity in the last 7-14 days.
+4. **Traction/Stars (Max 15pts):** Social proof (Stars/Forks).
+5. **"Founder Vibe" (Max 10pts):** Cool bio, interesting projects, unique personality.
+
+--------------------------------------------------------
+CRITICAL SCORING RULE:
+The sum of all categories MUST NOT exceed 100.
+If your calculated sum is 115, you MUST cap it at 100.
+
+CRITICAL RULES:
+1. Candidate A's stats must come ONLY from Candidate A's data block.
+2. Candidate B's stats must come ONLY from Candidate B's data block.
+3. Do NOT invent repos. Only reference repos that exist in the provided data.
+4. top_repo must be a real repo name from the candidate's data.
+
+OUTPUT JSON SCHEMA (STRICT — no markdown, no backticks):
+{
+  "winner": "user1" | "user2",
+  "winner_reason": "Detailed explanation citing specific category differences.",
+  "head_to_head": {
+    "velocity": "user1" | "user2",
+    "quality": "user1" | "user2",
+    "impact": "user1" | "user2"
+  },
+  "user1_stats": { "score": number, "top_repo": "string" },
+  "user2_stats": { "score": number, "top_repo": "string" }
+}
+`;
+
+const MOCK_COMPARE: CompareResult = {
+    winner: "user1",
+    winner_reason: "Candidate A has stronger documentation, more consistent commit history, and demonstrates CI/CD awareness across multiple repos.",
+    head_to_head: {
+        velocity: "user2",
+        quality: "user1",
+        impact: "user1",
+    },
+    user1_stats: { score: 73, top_repo: "portfolio-analyzer" },
+    user2_stats: { score: 61, top_repo: "todo-app" },
+    user1_username: "demo1",
+    user2_username: "demo2",
+};
+
+/**
+ * Raw AI comparison (not cached).
+ * Called by the cached wrapper below.
+ */
+async function _compareProfilesRaw(
+    user1Data: GitHubProfileData,
+    user2Data: GitHubProfileData,
+    persona: "recruiter" | "founder"
+): Promise<CompareResult> {
+    const u1 = user1Data.user.login;
+    const u2 = user2Data.user.login;
+
+    // --- DEMO MODE ---
+    if (
+        process.env.NEXT_PUBLIC_DEMO_MODE === "true" ||
+        u1.toLowerCase() === "demo" ||
+        u2.toLowerCase() === "demo"
+    ) {
+        console.log("[Compare] DEMO MODE: Returning mock comparison.");
+        await sleep(1500);
+        return { ...MOCK_COMPARE, user1_username: u1, user2_username: u2 };
+    }
+
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+        throw new Error("OPENROUTER_API_KEY is not set.");
+    }
+
+    const model = process.env.AI_MODEL || "openai/gpt-4o-mini";
+
+    // Build strict data-isolated prompt (Phase 2)
+    const repos1 = user1Data.repos.map(r => ({
+        name: r.name, stars: r.stargazers_count, description: r.description, language: r.language, updated_at: r.updated_at
+    }));
+    const repos2 = user2Data.repos.map(r => ({
+        name: r.name, stars: r.stargazers_count, description: r.description, language: r.language, updated_at: r.updated_at
+    }));
+
+    const modeLabel = persona === "recruiter" ? "FAANG Recruiter" : "YC Founder";
+    const userMessage = `
+=== DATA SOURCE: CANDIDATE A (${u1}) ===
+BIO: ${user1Data.user.bio || "No bio"}
+REPOS: ${JSON.stringify(repos1)}
+
+=== DATA SOURCE: CANDIDATE B (${u2}) ===
+BIO: ${user2Data.user.bio || "No bio"}
+REPOS: ${JSON.stringify(repos2)}
+
+Evaluate as a ${modeLabel}. Use "user1" for ${u1} and "user2" for ${u2} in your output.`;
+
+    const client = new OpenAI({
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey: apiKey,
+        defaultHeaders: {
+            "HTTP-Referer": "http://localhost:3000",
+            "X-Title": "GitHub Portfolio Analyzer - DevDuel",
+        },
+    });
+
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            if (attempt > 0) {
+                const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1);
+                console.log(`[Compare] Retry attempt ${attempt + 1} after ${delay}ms...`);
+                await sleep(delay);
+            }
+
+            console.log(`[Compare] Calling OpenRouter (${model}), ${modeLabel} mode, attempt ${attempt + 1}...`);
+
+            const completion = await client.chat.completions.create({
+                model: model,
+                messages: [
+                    { role: "system", content: COMPARE_SYSTEM_PROMPT },
+                    { role: "user", content: userMessage },
+                ],
+                temperature: 0.4,
+                max_tokens: 800,
+                seed: 42,
+            });
+
+            const rawText = completion.choices[0]?.message?.content;
+            if (!rawText) {
+                throw new Error("Empty response from AI");
+            }
+
+            const cleanJSON = extractJSON(rawText);
+            const parsed = JSON.parse(cleanJSON) as CompareResult;
+
+            // Validate required fields
+            if (!parsed.winner || !parsed.head_to_head || !parsed.user1_stats || !parsed.user2_stats) {
+                throw new Error("AI response missing required comparison fields");
+            }
+
+            // Step 2: Code-level score clamping (0-100)
+            const clamp = (n: number) => Math.min(100, Math.max(0, Math.round(n)));
+            parsed.user1_stats.score = clamp(parsed.user1_stats.score);
+            parsed.user2_stats.score = clamp(parsed.user2_stats.score);
+
+            // Attach usernames
+            parsed.user1_username = u1;
+            parsed.user2_username = u2;
+
+            console.log(`[Compare] Success! Winner: ${parsed.winner} (${u1}: ${parsed.user1_stats.score}, ${u2}: ${parsed.user2_stats.score})`);
+            return parsed;
+        } catch (error) {
+            lastError = error instanceof Error ? error : new Error(String(error));
+            console.warn(`[Compare] Attempt ${attempt + 1} failed: ${lastError.message}`);
+        }
+    }
+
+    // Phase 3: FAIL LOUDLY — no more mock fallback
+    throw lastError || new Error("AI comparison failed after all retries");
+}
+
+/**
+ * Cached wrapper for compareProfiles.
+ * Alphabetically sorts usernames so A-vs-B === B-vs-A.
+ * Cache is persona-specific with 24h revalidation.
+ */
+export const compareProfiles = async (
+    user1Data: GitHubProfileData,
+    user2Data: GitHubProfileData,
+    persona: "recruiter" | "founder"
+): Promise<CompareResult> => {
+    const u1 = user1Data.user.login.toLowerCase();
+    const u2 = user2Data.user.login.toLowerCase();
+
+    // Sort alphabetically so shadcn-vs-pranjal === pranjal-vs-shadcn
+    const sortedUsernames = [u1, u2].sort();
+    const cacheKey = `battle-${sortedUsernames[0]}-${sortedUsernames[1]}-${persona}`;
+
+    console.log(`[Compare Cache] Key: ${cacheKey}`);
+
+    const getCachedBattle = unstable_cache(
+        async () => {
+            return await _compareProfilesRaw(user1Data, user2Data, persona);
+        },
+        [cacheKey],
+        {
+            revalidate: 86400, // 24 hours
+            tags: [`battle-${sortedUsernames[0]}-${sortedUsernames[1]}`],
+        }
+    );
+
+    return await getCachedBattle();
+};
