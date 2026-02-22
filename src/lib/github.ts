@@ -139,6 +139,45 @@ export async function fetchGitHubData(
 }
 
 // ============================================
+// GitHub Content API (Deep Scan)
+// ============================================
+
+const MAX_FILE_CHARS = 3000;
+
+/**
+ * Fetches a specific file's content from a GitHub repo.
+ * Returns decoded UTF-8 string, truncated to MAX_FILE_CHARS.
+ * Returns null if file doesn't exist (404).
+ */
+export async function getRepoFileContent(
+    username: string,
+    repoName: string,
+    filePath: string
+): Promise<string | null> {
+    try {
+        const res = await fetch(
+            `https://api.github.com/repos/${username}/${repoName}/contents/${filePath}`,
+            {
+                headers: {
+                    Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+                    Accept: "application/vnd.github.v3+json",
+                },
+            }
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data.encoding !== "base64" || !data.content) return null;
+
+        const decoded = Buffer.from(data.content, "base64").toString("utf-8");
+        return decoded.length > MAX_FILE_CHARS
+            ? decoded.slice(0, MAX_FILE_CHARS) + "\n[...TRUNCATED]"
+            : decoded;
+    } catch {
+        return null;
+    }
+}
+
+// ============================================
 // Lightweight Fetch for DevDuel Compare Mode
 // ============================================
 
@@ -212,9 +251,22 @@ export async function fetchGitHubDataLite(
         `[GitHub-Lite] ${username}: Top ${topRepos.length} repos by stars → ${topRepos.map(r => `${r.name}(★${r.stargazers_count})`).join(', ')}`
     );
 
+    // --- Step 3: Deep Scan — fetch README + package.json from #1 repo ---
+    let deep_scan: { top_repo_name: string; readme: string | null; package_json: string | null } | undefined;
+    if (topRepos.length > 0) {
+        const topRepo = topRepos[0];
+        const [readme, pkg] = await Promise.all([
+            getRepoFileContent(username, topRepo.name, "README.md"),
+            getRepoFileContent(username, topRepo.name, "package.json"),
+        ]);
+        deep_scan = { top_repo_name: topRepo.name, readme, package_json: pkg };
+        console.log(`[Deep Scan] ${username}/${topRepo.name}: README=${readme ? 'YES' : 'NO'}, package.json=${pkg ? 'YES' : 'NO'}`);
+    }
+
     return {
         user,
         repos: topRepos,
+        deep_scan,
         fetchedAt: new Date().toISOString(),
     };
 }

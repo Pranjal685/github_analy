@@ -290,8 +290,8 @@ export async function analyzeProfile(
 
 // Weighted Category Scoring System
 const COMPARE_SYSTEM_PROMPT = `
-ROLE: Technical Referee.
-TASK: Compare Candidate A vs Candidate B.
+ROLE: Technical Referee with Deep Code Analysis.
+TASK: Compare Candidate A vs Candidate B using BOTH metadata AND actual code artifacts.
 
 --------------------------------------------------------
 SCORING ALGORITHM (WEIGHTED SUM):
@@ -313,6 +313,11 @@ You must score each candidate across 5 dimensions. Sum them to get the Total Sco
 4. **Traction/Stars (Max 15pts):** Social proof (Stars/Forks).
 5. **"Founder Vibe" (Max 10pts):** Cool bio, interesting projects, unique personality.
 
+### DEEP SCAN BONUS/PENALTY:
+- If a **package.json** is provided, analyze dependencies. Award bonus for Modern Stack (TypeScript, Tailwind, Prisma, NextAuth, Docker, tRPC, Zod, Vitest, etc.). Penalize for outdated or trivial setups (only create-react-app defaults, no linter/testing).
+- If a **README.md** is provided, reward detailed architecture docs, setup guides, and screenshots. Penalize default/boilerplate READMEs (e.g., "This project was bootstrapped with Create React App").
+- Deep Scan analysis should influence the total score by up to ±8 points.
+
 --------------------------------------------------------
 CRITICAL SCORING RULE:
 The sum of all categories MUST NOT exceed 100.
@@ -323,6 +328,7 @@ CRITICAL RULES:
 2. Candidate B's stats must come ONLY from Candidate B's data block.
 3. Do NOT invent repos. Only reference repos that exist in the provided data.
 4. top_repo must be a real repo name from the candidate's data.
+5. deep_scan_insights MUST reference actual dependencies or README content from the DEEP SCAN data.
 
 OUTPUT JSON SCHEMA (STRICT — no markdown, no backticks):
 {
@@ -334,7 +340,11 @@ OUTPUT JSON SCHEMA (STRICT — no markdown, no backticks):
     "impact": "user1" | "user2"
   },
   "user1_stats": { "score": number, "top_repo": "string" },
-  "user2_stats": { "score": number, "top_repo": "string" }
+  "user2_stats": { "score": number, "top_repo": "string" },
+  "deep_scan_insights": {
+    "user1_insight": "One sentence analyzing their top repo's code/dependencies/README quality.",
+    "user2_insight": "One sentence analyzing their top repo's code/dependencies/README quality."
+  }
 }
 `;
 
@@ -350,6 +360,10 @@ const MOCK_COMPARE: CompareResult = {
     user2_stats: { score: 61, top_repo: "todo-app" },
     user1_username: "demo1",
     user2_username: "demo2",
+    deep_scan_insights: {
+        user1_insight: "Strong modern stack: Next.js, TypeScript, Prisma, and Tailwind detected in package.json. README includes architecture diagrams.",
+        user2_insight: "Basic CRA setup with no custom dependencies. README is default boilerplate.",
+    },
 };
 
 /**
@@ -391,15 +405,37 @@ async function _compareProfilesRaw(
     }));
 
     const modeLabel = persona === "recruiter" ? "FAANG Recruiter" : "YC Founder";
+
+    // Build deep scan blocks
+    const ds1 = user1Data.deep_scan;
+    const deepScanBlock1 = ds1 ? `
+--- DEEP SCAN: ${ds1.top_repo_name} ---
+README.md:
+${ds1.readme || "[NOT FOUND]"}
+
+package.json:
+${ds1.package_json || "[NOT FOUND]"}
+` : "";
+
+    const ds2 = user2Data.deep_scan;
+    const deepScanBlock2 = ds2 ? `
+--- DEEP SCAN: ${ds2.top_repo_name} ---
+README.md:
+${ds2.readme || "[NOT FOUND]"}
+
+package.json:
+${ds2.package_json || "[NOT FOUND]"}
+` : "";
+
     const userMessage = `
 === DATA SOURCE: CANDIDATE A (${u1}) ===
 BIO: ${user1Data.user.bio || "No bio"}
 REPOS: ${JSON.stringify(repos1)}
-
+${deepScanBlock1}
 === DATA SOURCE: CANDIDATE B (${u2}) ===
 BIO: ${user2Data.user.bio || "No bio"}
 REPOS: ${JSON.stringify(repos2)}
-
+${deepScanBlock2}
 Evaluate as a ${modeLabel}. Use "user1" for ${u1} and "user2" for ${u2} in your output.`;
 
     const client = new OpenAI({
@@ -430,7 +466,7 @@ Evaluate as a ${modeLabel}. Use "user1" for ${u1} and "user2" for ${u2} in your 
                     { role: "user", content: userMessage },
                 ],
                 temperature: 0.4,
-                max_tokens: 800,
+                max_tokens: 1200,
                 seed: 42,
             });
 

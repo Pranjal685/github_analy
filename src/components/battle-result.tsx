@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import type { CompareResult } from "@/lib/types";
-import { Trophy, Zap, Shield, Rocket, Star } from "lucide-react";
+import { Trophy, Zap, Shield, Rocket, Star, ScanSearch } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface BattleResultProps {
@@ -22,42 +22,62 @@ function HeadToHeadBar({
     user1: string;
     user2: string;
 }) {
-    const u1Wins = winner === "user1";
-    const u2Wins = winner === "user2";
+    const isUser1 = winner === "user1";
+    const isUser2 = winner === "user2";
 
     return (
-        <div className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2 font-medium text-zinc-300">
-                    <Icon className="h-4 w-4 text-cyan-400/70" />
-                    {label}
-                </span>
+        <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
+                <Icon className="h-4 w-4" />
+                <span className="font-medium">{label}</span>
             </div>
-            <div className="flex h-8 rounded-lg overflow-hidden border border-white/5">
-                <div
-                    className={`flex items-center justify-center text-xs font-bold transition-all duration-700 ${u1Wins
-                        ? "bg-emerald-500/30 text-emerald-300 flex-[3]"
-                        : "bg-white/5 text-zinc-500 flex-[1]"
-                        }`}
-                >
-                    {user1} {u1Wins && "✓"}
+            <div className="flex gap-1.5 h-7 items-center">
+                {/* User 1 bar */}
+                <div className="flex-1 flex items-center justify-end">
+                    <span className="text-xs text-zinc-400 mr-2 font-mono">{user1}</span>
+                    <div
+                        className={`h-full rounded-l-md transition-all duration-500 ${isUser1
+                            ? "bg-gradient-to-r from-cyan-500 to-blue-500 w-3/4 shadow-[0_0_15px_rgba(6,182,212,0.2)]"
+                            : "bg-zinc-700/50 w-1/4"
+                            }`}
+                    />
                 </div>
-                <div className="w-px bg-white/10" />
-                <div
-                    className={`flex items-center justify-center text-xs font-bold transition-all duration-700 ${u2Wins
-                        ? "bg-emerald-500/30 text-emerald-300 flex-[3]"
-                        : "bg-white/5 text-zinc-500 flex-[1]"
-                        }`}
-                >
-                    {u2Wins && "✓"} {user2}
+                {/* User 2 bar */}
+                <div className="flex-1 flex items-center">
+                    <div
+                        className={`h-full rounded-r-md transition-all duration-500 ${isUser2
+                            ? "bg-gradient-to-r from-orange-500 to-red-500 w-3/4 shadow-[0_0_15px_rgba(249,115,22,0.2)]"
+                            : "bg-zinc-700/50 w-1/4"
+                            }`}
+                    />
+                    <span className="text-xs text-zinc-400 ml-2 font-mono">{user2}</span>
                 </div>
             </div>
         </div>
     );
 }
 
+function DeepScanCard({ username, insight, gradient }: { username: string; insight: string; gradient: string }) {
+    return (
+        <div className="mt-3 rounded-lg bg-[#0a0f1a] border border-zinc-800/60 overflow-hidden">
+            <div className={`px-4 py-2 flex items-center gap-2 border-b border-zinc-800/60 bg-gradient-to-r ${gradient}`}>
+                <ScanSearch className="h-3.5 w-3.5 text-zinc-300" />
+                <span className="text-xs font-bold text-zinc-300 font-mono tracking-wider uppercase">
+                    Deep Scan — {username}
+                </span>
+            </div>
+            <div className="px-4 py-3">
+                <p className="text-xs text-emerald-400/90 font-mono leading-relaxed">
+                    <span className="text-zinc-500 select-none">&gt; </span>
+                    {insight}
+                </p>
+            </div>
+        </div>
+    );
+}
+
 export function BattleResult({ result }: BattleResultProps) {
-    const { winner, winner_reason, head_to_head, user1_stats, user2_stats, user1_username, user2_username } = result;
+    const { winner, winner_reason, head_to_head, user1_stats, user2_stats, user1_username, user2_username, deep_scan_insights } = result;
 
     // Step 3: Update URL with scores so shared links trigger OG image
     useEffect(() => {
@@ -121,6 +141,14 @@ export function BattleResult({ result }: BattleResultProps) {
                                 {user1_stats.top_repo}
                             </span>
                         </div>
+                        {/* Deep Scan Insight — User 1 */}
+                        {deep_scan_insights?.user1_insight && (
+                            <DeepScanCard
+                                username={user1_username}
+                                insight={deep_scan_insights.user1_insight}
+                                gradient="from-cyan-900/20 to-blue-900/20"
+                            />
+                        )}
                     </CardContent>
                 </Card>
 
@@ -149,6 +177,14 @@ export function BattleResult({ result }: BattleResultProps) {
                                 {user2_stats.top_repo}
                             </span>
                         </div>
+                        {/* Deep Scan Insight — User 2 */}
+                        {deep_scan_insights?.user2_insight && (
+                            <DeepScanCard
+                                username={user2_username}
+                                insight={deep_scan_insights.user2_insight}
+                                gradient="from-orange-900/20 to-red-900/20"
+                            />
+                        )}
                     </CardContent>
                 </Card>
             </div>

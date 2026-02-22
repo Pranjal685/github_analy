@@ -50,6 +50,11 @@ export interface GitHubRepo {
 export interface GitHubProfileData {
     user: GitHubUser;
     repos: GitHubRepo[];
+    deep_scan?: {
+        top_repo_name: string;
+        readme: string | null;
+        package_json: string | null;
+    };
     fetchedAt: string; // ISO timestamp of when data was fetched
 }
 
@@ -111,6 +116,10 @@ export interface CompareResult {
     user2_stats: UserStats;
     user1_username: string;
     user2_username: string;
+    deep_scan_insights?: {
+        user1_insight: string;
+        user2_insight: string;
+    };
 }
 
 export interface CompareResponse {
