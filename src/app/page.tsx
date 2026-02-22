@@ -2,6 +2,7 @@
 
 import { SearchForm } from "@/components/search-form";
 import { Terminal, Zap, Shield, Github, Swords, Trophy } from "lucide-react";
+import AuthButton from "@/components/AuthButton";
 import { motion } from "framer-motion";
 import Link from "next/link";
 
@@ -25,6 +26,11 @@ const scaleIn = {
 export default function HomePage() {
   return (
     <main className="relative min-h-screen flex flex-col items-center justify-center px-4 overflow-hidden">
+      {/* Auth Button — Top Right */}
+      <div className="absolute top-6 right-6 z-20">
+        <AuthButton />
+      </div>
+
       {/* Radial glow behind hero */}
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[500px] bg-cyan-500/[0.07] rounded-full blur-[140px] pointer-events-none" />
 

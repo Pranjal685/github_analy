@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getServerSession } from "next-auth";
 import CompareClient from "./compare-client";
 
 type Props = {
@@ -41,6 +42,8 @@ export async function generateMetadata({ searchParams }: Props): Promise<Metadat
     };
 }
 
-export default function ComparePage() {
-    return <CompareClient />;
+export default async function ComparePage() {
+    const session = await getServerSession();
+    const username = (session?.user as any)?.username || "";
+    return <CompareClient lockedUser={username} />;
 }

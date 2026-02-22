@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useSession, signIn } from "next-auth/react";
 import { performComparison } from "@/app/actions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { BattleResult } from "@/components/battle-result";
-import { Swords, Loader2, ArrowLeft, ChevronDown } from "lucide-react";
+import { Swords, Loader2, ArrowLeft, ChevronDown, Github, Lock } from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import type { CompareResult } from "@/lib/types";
@@ -27,8 +28,10 @@ const container = {
     },
 };
 
-export default function CompareClient() {
-    const [user1, setUser1] = useState("");
+export default function CompareClient({ lockedUser = "" }: { lockedUser?: string }) {
+    const { data: session } = useSession();
+    const isLocked = !!lockedUser;
+    const [user1, setUser1] = useState(lockedUser);
     const [user2, setUser2] = useState("");
     const [persona, setPersona] = useState<"recruiter" | "founder">("recruiter");
     const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -131,17 +134,20 @@ export default function CompareClient() {
                     <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 items-end">
                         {/* User 1 */}
                         <div className="space-y-1.5">
-                            <label className="text-sm font-medium text-zinc-400 font-mono">
+                            <label className="text-sm font-medium text-zinc-400 font-mono flex items-center gap-1.5">
                                 Challenger 1
+                                {isLocked && <Lock className="h-3 w-3 text-yellow-400" />}
                             </label>
                             <Input
                                 type="text"
                                 placeholder="e.g. Pranjal685"
                                 value={user1}
-                                onChange={(e) => { setUser1(e.target.value); setError(null); }}
+                                onChange={(e) => { if (!isLocked) { setUser1(e.target.value); setError(null); } }}
                                 disabled={isLoading}
+                                readOnly={isLocked}
                                 autoComplete="off"
                                 spellCheck={false}
+                                className={isLocked ? "border-yellow-500/30 text-yellow-300/80 cursor-not-allowed bg-yellow-500/[0.04]" : ""}
                             />
                         </div>
 
@@ -204,25 +210,37 @@ export default function CompareClient() {
                             )}
                         </div>
 
-                        {/* FIGHT Button */}
-                        <Button
-                            type="submit"
-                            size="lg"
-                            disabled={isLoading || !user1.trim() || !user2.trim()}
-                            className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white font-bold text-lg shadow-[0_0_20px_rgba(249,115,22,0.2)] hover:shadow-[0_0_30px_rgba(249,115,22,0.3)] transition-all"
-                        >
-                            {isLoading ? (
-                                <>
-                                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                                    Analyzing fighters...
-                                </>
-                            ) : (
-                                <>
-                                    <Swords className="h-5 w-5 mr-2" />
-                                    ⚔️ FIGHT
-                                </>
-                            )}
-                        </Button>
+                        {/* FIGHT Button — Gated Behind Login */}
+                        {session ? (
+                            <Button
+                                type="submit"
+                                size="lg"
+                                disabled={isLoading || !user1.trim() || !user2.trim()}
+                                className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white font-bold text-lg shadow-[0_0_20px_rgba(249,115,22,0.2)] hover:shadow-[0_0_30px_rgba(249,115,22,0.3)] transition-all"
+                            >
+                                {isLoading ? (
+                                    <>
+                                        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                                        Analyzing fighters...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Swords className="h-5 w-5 mr-2" />
+                                        ⚔️ FIGHT
+                                    </>
+                                )}
+                            </Button>
+                        ) : (
+                            <Button
+                                type="button"
+                                size="lg"
+                                onClick={() => signIn("github")}
+                                className="flex-1 bg-white hover:bg-zinc-200 text-black font-bold text-lg transition-all"
+                            >
+                                <Github className="h-5 w-5 mr-2" />
+                                Sign in with GitHub to Battle
+                            </Button>
+                        )}
                     </div>
 
                 </motion.form>
